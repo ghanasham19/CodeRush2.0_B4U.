@@ -105,14 +105,15 @@ const Marketplace = () => {
       const amountInMicroAlgos = Math.floor(Number(price) * 1000000);
 
       // 5. Use the raw base Transaction constructor (Bypasses helper function bugs)
-      const txn = new algosdk.Transaction({
-        type: 'pay',
-        from: safeSender,
-        to: safeReceiver,
-        amount: amountInMicroAlgos,
-        suggestedParams: suggestedParams,
-        note: new Uint8Array(new TextEncoder().encode("EvidenceHub Insight"))
-      });
+      const txn = new algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+    sender: safeSender,
+    receiver: safeReceiver,
+    amount: amountInMicroAlgos,
+    suggestedParams,
+    note: new Uint8Array(
+        new TextEncoder().encode("EvidenceHub Insight")
+    )
+});
 
       const encodedTxn = algosdk.encodeUnsignedTransaction(txn);
       const txnBase64 = window.btoa(String.fromCharCode.apply(null, encodedTxn));
