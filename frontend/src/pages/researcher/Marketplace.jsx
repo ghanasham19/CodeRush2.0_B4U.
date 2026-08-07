@@ -4,24 +4,23 @@ import { collection, getDocs, doc, updateDoc, getDoc } from 'firebase/firestore'
 import { useAuth } from '../../context/AuthContext';
 import { useWeb3 } from '../../context/Web3Context';
 import ReactMarkdown from 'react-markdown';
+import algosdk from 'algosdk';
+
 const Marketplace = () => {
   const { currentUser } = useAuth();
-  const { peraWallet, account } = useWeb3();
+  const { lute, account } = useWeb3();
 
   const [documents, setDocuments] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
 
-  // Navigation State
   const [selectedDoc, setSelectedDoc] = useState(null);
 
-  // Budget State
   const [maxBudget, setMaxBudget] = useState(0);
   const [spent, setSpent] = useState(0);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [newBudgetInput, setNewBudgetInput] = useState('');
 
-  // Insight Unlocking State (Tracks which questions have been paid for)
   const [unlockedAnswers, setUnlockedAnswers] = useState({});
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -59,7 +58,7 @@ const Marketplace = () => {
     }
   };
 
- const handleUnlockQuestion = async (questionIndex, price, questionText) => {
+  const handleUnlockQuestion = async (questionIndex, price, questionText) => {
     if (spent + price > maxBudget) {
       return alert("Transaction declined: This exceeds your ALGO budget limit!");
     }
@@ -67,13 +66,71 @@ const Marketplace = () => {
     setIsProcessing(questionIndex);
 
     try {
-      // 1. Simulate Algorand Web3 Transaction (We will replace this in the next step)
+      const senderAddress = account;
+      if (!senderAddress) {
+        throw new Error("Your Lute wallet is not connected. Please refresh and log in again.");
+      }
+
+      // Look up the Publisher's real Algorand Wallet Address using Firebase
+      const publisherRef = doc(db, 'users', selectedDoc.publisherId);
+      const publisherSnap = await getDoc(publisherRef);
+
+      if (!publisherSnap.exists() || !publisherSnap.data().walletAddress) {
+        throw new Error("Could not find the Publisher's Algorand wallet address in the database.");
+      }
+
+      const receiverAddress = publisherSnap.data().walletAddress;
+
+      console.log(`[Web3] Preparing to send ${price} ALGO`);
+      console.log(`[Web3] From: ${senderAddress}`);
+      console.log(`[Web3] To: ${receiverAddress}`);
+
+      // 1. Force strict string conversion and trim
+      const safeSender = String(senderAddress).trim();
+      const safeReceiver = String(receiverAddress).trim();
+
+      // 2. Native Algorand Validation Check
+      if (!algosdk.isValidAddress(safeSender)) {
+        throw new Error(`CRITICAL: Sender address is invalid: "${safeSender}"`);
+      }
+      if (!algosdk.isValidAddress(safeReceiver)) {
+        throw new Error(`CRITICAL: Receiver address is invalid: "${safeReceiver}"`);
+      }
+
+      // 3. Connect to Algorand TestNet
+      const algodClient = new algosdk.Algodv2('', 'https://testnet-api.algonode.cloud', '');
+      const suggestedParams = await algodClient.getTransactionParams().do();
+
+      // 4. Safest math for microAlgos conversion
+      const amountInMicroAlgos = Math.floor(Number(price) * 1000000);
+
+      // 5. Use the raw base Transaction constructor (Bypasses helper function bugs)
+      const txn = new algosdk.Transaction({
+        type: 'pay',
+        from: safeSender,
+        to: safeReceiver,
+        amount: amountInMicroAlgos,
+        suggestedParams: suggestedParams,
+        note: new Uint8Array(new TextEncoder().encode("EvidenceHub Insight"))
+      });
+
+      const encodedTxn = algosdk.encodeUnsignedTransaction(txn);
+      const txnBase64 = window.btoa(String.fromCharCode.apply(null, encodedTxn));
+
+      // Trigger Lute to sign
+      const signedTxns = await lute.signTxns([{ txn: txnBase64 }]);
+
+      // Broadcast to network
+      const { txId } = await algodClient.sendRawTransaction(signedTxns[0]).do();
+      console.log(`✅ Transaction Broadcasted! TXID: ${txId}`);
+
+      // Update Local Budget
       const newSpent = spent + price;
       const userRef = doc(db, 'users', currentUser.uid);
       await updateDoc(userRef, { spent: newSpent });
       setSpent(newSpent);
 
-      // 2. Call our REAL Gemini AI Backend Route
+      // Fetch AI Insight
       const response = await fetch('http://localhost:5000/api/ai/insight', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -86,10 +143,9 @@ const Marketplace = () => {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to fetch AI insight');
+        throw new Error(data.details || data.error || 'Failed to fetch AI insight');
       }
 
-      // 3. Unlock the real UI answer
       setUnlockedAnswers(prev => ({
         ...prev,
         [questionIndex]: data.answer
@@ -97,7 +153,7 @@ const Marketplace = () => {
 
     } catch (error) {
       console.error(error);
-      alert("Error generating insight: " + error.message);
+      alert("Transaction failed: " + error.message);
     } finally {
       setIsProcessing(false);
     }
@@ -106,13 +162,9 @@ const Marketplace = () => {
   const remainingBudget = maxBudget - spent;
   const filteredDocs = documents.filter(doc => doc.title.toLowerCase().includes(searchQuery.toLowerCase()));
 
-  // ==========================================
-  // VIEW 1: THE INSIGHT DASHBOARD (SPLIT SCREEN)
-  // ==========================================
   if (selectedDoc) {
     return (
       <div className="max-w-7xl mx-auto p-6">
-        {/* Top Navigation */}
         <div className="flex justify-between items-center mb-6">
           <button
             onClick={() => { setSelectedDoc(null); setUnlockedAnswers({}); }}
@@ -126,14 +178,13 @@ const Marketplace = () => {
         </div>
 
         <div className="flex flex-col lg:flex-row gap-8">
-          {/* Left Side: Document Context */}
           <div className="lg:w-1/3 space-y-6">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <span className="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide">
                 Document Preview
               </span>
               <h2 className="text-2xl font-bold text-gray-900 mt-4 mb-2">{selectedDoc.title}</h2>
-              <p className="text-gray-500 text-sm mb-6">Published by: {selectedDoc.publisherId.slice(0, 8)}...</p>
+              <p className="text-gray-500 text-sm mb-6">Published by: {selectedDoc.publisherId.slice(0,8)}...</p>
 
               <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                 <p className="text-gray-600 text-sm italic">
@@ -143,7 +194,6 @@ const Marketplace = () => {
             </div>
           </div>
 
-          {/* Right Side: Pay-Per-Insight Questions */}
           <div className="lg:w-2/3">
             <h3 className="text-xl font-bold mb-4">Available AI Insights</h3>
 
@@ -162,7 +212,7 @@ const Marketplace = () => {
 
                         {!isUnlocked && (
                           <button
-                           onClick={() => handleUnlockQuestion(index, q.price, q.text)}
+                            onClick={() => handleUnlockQuestion(index, q.price, q.text)}
                             disabled={isProcessing !== false || !account}
                             className="flex-shrink-0 bg-yellow-400 hover:bg-yellow-500 text-gray-900 px-4 py-2 rounded-lg font-bold text-sm shadow-sm transition-colors disabled:opacity-50 flex items-center gap-2"
                           >
@@ -174,11 +224,11 @@ const Marketplace = () => {
 
                       {isLoading && (
                         <div className="mt-4 text-blue-600 font-bold text-sm animate-pulse flex items-center gap-2">
-                          <span>Analyzing document...</span>
+                          <span>Sign transaction in Lute & Analyzing document...</span>
                         </div>
                       )}
 
-                   {isUnlocked && (
+                      {isUnlocked && (
                         <div className="mt-4 pt-4 border-t border-green-200">
                           <span className="text-xs font-bold text-green-700 uppercase tracking-wider mb-4 block">AI Response & Provenance</span>
                           <div className="prose prose-sm max-w-none text-gray-800 leading-relaxed marker:text-yellow-500 prose-headings:font-bold prose-headings:text-gray-900 prose-strong:text-blue-700">
@@ -197,9 +247,6 @@ const Marketplace = () => {
     );
   }
 
-  // ==========================================
-  // VIEW 2: THE MARKETPLACE GRID
-  // ==========================================
   return (
     <div className="max-w-7xl mx-auto p-6">
       <div className="bg-gray-900 rounded-2xl p-6 mb-8 text-white flex flex-col md:flex-row justify-between items-center shadow-lg">
@@ -245,7 +292,7 @@ const Marketplace = () => {
                   {doc.questions?.length || 0} Insights
                 </span>
                 <h3 className="text-xl font-bold text-gray-900 mt-4 mb-2 line-clamp-2">{doc.title}</h3>
-                <p className="text-gray-500 text-sm mb-4">Author: {doc.publisherId.slice(0, 6)}...</p>
+                <p className="text-gray-500 text-sm mb-4">Author: {doc.publisherId.slice(0,6)}...</p>
               </div>
 
               <div className="pt-4 border-t border-gray-100">
@@ -261,12 +308,11 @@ const Marketplace = () => {
         </div>
       )}
 
-      {/* Budget Modal */}
       {showBudgetModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl max-w-md w-full p-6">
             <h2 className="text-2xl font-bold mb-2">Set Maximum Budget</h2>
-            <p className="text-gray-600 mb-6 text-sm">Set your maximum ALGO spend limit to protect your Pera Wallet.</p>
+            <p className="text-gray-600 mb-6 text-sm">Set your maximum ALGO spend limit to protect your Wallet.</p>
             <form onSubmit={handleSaveBudget} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Max Budget (ALGO)</label>
