@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { useWeb3 } from './Web3Context';
 
 const AuthContext = createContext();
 
@@ -11,26 +12,19 @@ export const AuthProvider = ({ children }) => {
   const [userRole, setUserRole] = useState(null); 
   const [loading, setLoading] = useState(true);
 
-  // Pure Web3 Authentication
-  const loginWithWallet = async (walletAddress, signer, selectedRole = null) => {
-    const cleanAddress = walletAddress.toLowerCase();
+  // Pure Web3 Authentication using Algorand Wallet Address
+  const loginWithWallet = async (walletAddress, selectedRole = null) => {
+    // Algorand addresses are case-sensitive Base32 strings, so we don't lowercase them like ETH
+    const address = walletAddress;
     
-    // 1. Create a SIWE challenge message
-    const timestamp = Date.now();
-    const message = `Welcome to EvidenceHub AI!\n\nSign this message to prove you own this wallet.\n\nWallet: ${cleanAddress}\nTimestamp: ${timestamp}`;
-    
-    // 2. Request user to sign the message
-    const signature = await signer.signMessage(message);
-    if (!signature) throw new Error("Wallet signature rejected.");
-
-    // 3. Check Firestore for existing user
-    const userDocRef = doc(db, 'users', cleanAddress);
+    // Check Firestore for existing user
+    const userDocRef = doc(db, 'users', address);
     const userDoc = await getDoc(userDocRef);
 
     let activeRole;
 
     if (userDoc.exists()) {
-      // User exists -> fetch their saved role (ignores selectedRole)
+      // User exists -> fetch their saved role
       activeRole = userDoc.data().role;
     } else {
       // New User -> Must provide a role during registration
@@ -38,7 +32,7 @@ export const AuthProvider = ({ children }) => {
       activeRole = selectedRole;
       
       await setDoc(userDocRef, {
-        walletAddress: cleanAddress,
+        walletAddress: address,
         role: activeRole,
         createdAt: new Date().toISOString(),
         maxBudget: 50,
@@ -46,17 +40,17 @@ export const AuthProvider = ({ children }) => {
       });
     }
 
-    // 4. Construct Session
+    // Construct Session
     const web3User = {
-      uid: cleanAddress,
-      walletAddress: cleanAddress,
+      uid: address,
+      walletAddress: address,
       isWeb3: true
     };
 
     setCurrentUser(web3User);
     setUserRole(activeRole);
     
-    localStorage.setItem('web3_session', JSON.stringify({ walletAddress: cleanAddress, role: activeRole }));
+    localStorage.setItem('web3_session', JSON.stringify({ walletAddress: address, role: activeRole }));
     return web3User;
   };
 

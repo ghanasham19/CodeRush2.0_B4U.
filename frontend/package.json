@@ -10,10 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "ethers": "^6.17.0",
+    "algosdk": "^3.6.0",
     "firebase": "^12.17.1",
+    "lute-connect": "^2.0.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.2"
   },
   "devDependencies": {

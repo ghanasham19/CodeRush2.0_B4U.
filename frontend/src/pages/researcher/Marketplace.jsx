@@ -1,66 +1,283 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../config/firebase';
-import { collection, getDocs } from 'firebase/firestore';
-
+import { collection, getDocs, doc, updateDoc, getDoc } from 'firebase/firestore';
+import { useAuth } from '../../context/AuthContext';
+import { useWeb3 } from '../../context/Web3Context';
+import ReactMarkdown from 'react-markdown';
 const Marketplace = () => {
+  const { currentUser } = useAuth();
+  const { peraWallet, account } = useWeb3();
+
   const [documents, setDocuments] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
 
+  // Navigation State
+  const [selectedDoc, setSelectedDoc] = useState(null);
+
+  // Budget State
+  const [maxBudget, setMaxBudget] = useState(0);
+  const [spent, setSpent] = useState(0);
+  const [showBudgetModal, setShowBudgetModal] = useState(false);
+  const [newBudgetInput, setNewBudgetInput] = useState('');
+
+  // Insight Unlocking State (Tracks which questions have been paid for)
+  const [unlockedAnswers, setUnlockedAnswers] = useState({});
+  const [isProcessing, setIsProcessing] = useState(false);
+
   useEffect(() => {
-    const fetchMarketplaceDocs = async () => {
+    const fetchData = async () => {
       try {
+        const userRef = doc(db, 'users', currentUser.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          setMaxBudget(userSnap.data().maxBudget || 0);
+          setSpent(userSnap.data().spent || 0);
+        }
+
         const querySnapshot = await getDocs(collection(db, 'documents'));
         const docsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setDocuments(docsData);
       } catch (error) {
-        console.error("Error fetching marketplace documents: ", error);
+        console.error("Error fetching data: ", error);
       } finally {
         setLoading(false);
       }
     };
+    fetchData();
+  }, [currentUser]);
 
-    fetchMarketplaceDocs();
-  }, []);
+  const handleSaveBudget = async (e) => {
+    e.preventDefault();
+    try {
+      const userRef = doc(db, 'users', currentUser.uid);
+      await updateDoc(userRef, { maxBudget: Number(newBudgetInput) });
+      setMaxBudget(Number(newBudgetInput));
+      setShowBudgetModal(false);
+    } catch (error) {
+      alert("Failed to update budget.");
+    }
+  };
 
+ const handleUnlockQuestion = async (questionIndex, price, questionText) => {
+    if (spent + price > maxBudget) {
+      return alert("Transaction declined: This exceeds your ALGO budget limit!");
+    }
+
+    setIsProcessing(questionIndex);
+
+    try {
+      // 1. Simulate Algorand Web3 Transaction (We will replace this in the next step)
+      const newSpent = spent + price;
+      const userRef = doc(db, 'users', currentUser.uid);
+      await updateDoc(userRef, { spent: newSpent });
+      setSpent(newSpent);
+
+      // 2. Call our REAL Gemini AI Backend Route
+      const response = await fetch('http://localhost:5000/api/ai/insight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentUrl: selectedDoc.pdfUrl,
+          question: questionText
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to fetch AI insight');
+      }
+
+      // 3. Unlock the real UI answer
+      setUnlockedAnswers(prev => ({
+        ...prev,
+        [questionIndex]: data.answer
+      }));
+
+    } catch (error) {
+      console.error(error);
+      alert("Error generating insight: " + error.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const remainingBudget = maxBudget - spent;
+  const filteredDocs = documents.filter(doc => doc.title.toLowerCase().includes(searchQuery.toLowerCase()));
+
+  // ==========================================
+  // VIEW 1: THE INSIGHT DASHBOARD (SPLIT SCREEN)
+  // ==========================================
+  if (selectedDoc) {
+    return (
+      <div className="max-w-7xl mx-auto p-6">
+        {/* Top Navigation */}
+        <div className="flex justify-between items-center mb-6">
+          <button
+            onClick={() => { setSelectedDoc(null); setUnlockedAnswers({}); }}
+            className="text-gray-600 hover:text-gray-900 font-bold flex items-center gap-2"
+          >
+            ← Back to Marketplace
+          </button>
+          <div className="bg-gray-900 text-white px-4 py-2 rounded-lg font-mono text-sm shadow">
+            Budget: <span className={remainingBudget <= 0 ? 'text-red-400' : 'text-green-400'}>{remainingBudget.toFixed(2)} ALGO</span>
+          </div>
+        </div>
+
+        <div className="flex flex-col lg:flex-row gap-8">
+          {/* Left Side: Document Context */}
+          <div className="lg:w-1/3 space-y-6">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <span className="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide">
+                Document Preview
+              </span>
+              <h2 className="text-2xl font-bold text-gray-900 mt-4 mb-2">{selectedDoc.title}</h2>
+              <p className="text-gray-500 text-sm mb-6">Published by: {selectedDoc.publisherId.slice(0, 8)}...</p>
+
+              <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                <p className="text-gray-600 text-sm italic">
+                  "Full document text is hidden to protect intellectual property. Purchase specific insights on the right to extract verified data via AI."
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Side: Pay-Per-Insight Questions */}
+          <div className="lg:w-2/3">
+            <h3 className="text-xl font-bold mb-4">Available AI Insights</h3>
+
+            {(!selectedDoc.questions || selectedDoc.questions.length === 0) ? (
+              <p className="text-gray-500">The publisher has not defined any questions for this document yet.</p>
+            ) : (
+              <div className="space-y-4">
+                {selectedDoc.questions.map((q, index) => {
+                  const isUnlocked = unlockedAnswers[index];
+                  const isLoading = isProcessing === index;
+
+                  return (
+                    <div key={index} className={`p-6 rounded-2xl border transition-all ${isUnlocked ? 'bg-green-50 border-green-200' : 'bg-white border-gray-200 shadow-sm hover:shadow-md'}`}>
+                      <div className="flex justify-between items-start mb-2">
+                        <h4 className="font-bold text-lg text-gray-900 pr-4">{q.text}</h4>
+
+                        {!isUnlocked && (
+                          <button
+                           onClick={() => handleUnlockQuestion(index, q.price, q.text)}
+                            disabled={isProcessing !== false || !account}
+                            className="flex-shrink-0 bg-yellow-400 hover:bg-yellow-500 text-gray-900 px-4 py-2 rounded-lg font-bold text-sm shadow-sm transition-colors disabled:opacity-50 flex items-center gap-2"
+                          >
+                            <span>🟡 {q.price} ALGO</span>
+                            <span>Unlock</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {isLoading && (
+                        <div className="mt-4 text-blue-600 font-bold text-sm animate-pulse flex items-center gap-2">
+                          <span>Analyzing document...</span>
+                        </div>
+                      )}
+
+                   {isUnlocked && (
+                        <div className="mt-4 pt-4 border-t border-green-200">
+                          <span className="text-xs font-bold text-green-700 uppercase tracking-wider mb-4 block">AI Response & Provenance</span>
+                          <div className="prose prose-sm max-w-none text-gray-800 leading-relaxed marker:text-yellow-500 prose-headings:font-bold prose-headings:text-gray-900 prose-strong:text-blue-700">
+                            <ReactMarkdown>{unlockedAnswers[index]}</ReactMarkdown>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // VIEW 2: THE MARKETPLACE GRID
+  // ==========================================
   return (
     <div className="max-w-7xl mx-auto p-6">
-      <div className="mb-10 text-center">
-        <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight mb-4">Research Marketplace</h1>
-        <p className="text-xl text-gray-600">Discover and query premium research with verified provenance.</p>
+      <div className="bg-gray-900 rounded-2xl p-6 mb-8 text-white flex flex-col md:flex-row justify-between items-center shadow-lg">
+        <div>
+          <h2 className="text-2xl font-bold mb-1">Web3 Research Terminal</h2>
+          <p className="text-gray-400 text-sm">Pay-per-insight via Algorand x402 Protocol</p>
+        </div>
+        <div className="mt-4 md:mt-0 flex items-center space-x-6">
+          <div className="text-right">
+            <p className="text-gray-400 text-sm uppercase tracking-wider font-bold">ALGO Budget</p>
+            <p className={`text-3xl font-black ${remainingBudget <= 0 ? 'text-red-500' : 'text-green-400'}`}>
+              {remainingBudget.toFixed(2)}
+            </p>
+          </div>
+          <button onClick={() => setShowBudgetModal(true)} className="border border-gray-600 hover:border-white px-4 py-2 rounded-lg transition-colors font-semibold">
+            Set Limit
+          </button>
+        </div>
+      </div>
+
+      <div className="mb-8">
+        <input
+          type="text"
+          placeholder="Search for research papers..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full px-6 py-4 rounded-xl border border-gray-300 shadow-sm text-lg focus:ring-2 focus:ring-yellow-400 outline-none transition-all"
+        />
       </div>
 
       {loading ? (
-        <div className="flex justify-center text-xl text-gray-500">Loading research database...</div>
-      ) : documents.length === 0 ? (
+        <div className="flex justify-center text-xl text-gray-500">Searching database...</div>
+      ) : filteredDocs.length === 0 ? (
         <div className="text-center bg-white p-12 rounded-xl shadow-sm border border-gray-100">
-          <p className="text-gray-500 text-lg">No research documents available yet.</p>
+          <p className="text-gray-500 text-lg">No documents match your search.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {documents.map((doc) => (
-            <div key={doc.id} className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 flex flex-col hover:shadow-lg transition-shadow">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredDocs.map((doc) => (
+            <div key={doc.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 flex flex-col hover:shadow-lg transition-shadow">
               <div className="flex-grow">
-                <span className="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide">
-                  Research Paper
+                <span className="bg-yellow-100 text-yellow-800 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide">
+                  {doc.questions?.length || 0} Insights
                 </span>
-                <h3 className="text-xl font-bold text-gray-900 mt-4 mb-2 line-clamp-2">
-                  {doc.title}
-                </h3>
-                <p className="text-gray-500 text-sm mb-4">
-                  Added: {new Date(doc.createdAt).toLocaleDateString()}
-                </p>
+                <h3 className="text-xl font-bold text-gray-900 mt-4 mb-2 line-clamp-2">{doc.title}</h3>
+                <p className="text-gray-500 text-sm mb-4">Author: {doc.publisherId.slice(0, 6)}...</p>
               </div>
-              
-              <div className="pt-4 border-t border-gray-100 flex items-center justify-between mt-4">
-                <div className="text-2xl font-black text-gray-900">
-                  ${doc.price}
-                </div>
-                <button className="bg-gray-900 text-white px-5 py-2 rounded-lg font-semibold hover:bg-gray-800 transition-colors">
-                  View Details
+
+              <div className="pt-4 border-t border-gray-100">
+                <button
+                  onClick={() => setSelectedDoc(doc)}
+                  className="w-full bg-gray-900 text-white px-5 py-3 rounded-xl font-bold hover:bg-gray-800 transition-colors"
+                >
+                  Enter Dashboard
                 </button>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Budget Modal */}
+      {showBudgetModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full p-6">
+            <h2 className="text-2xl font-bold mb-2">Set Maximum Budget</h2>
+            <p className="text-gray-600 mb-6 text-sm">Set your maximum ALGO spend limit to protect your Pera Wallet.</p>
+            <form onSubmit={handleSaveBudget} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Max Budget (ALGO)</label>
+                <input type="number" required min="1" step="0.1" value={newBudgetInput} onChange={e => setNewBudgetInput(e.target.value)} className="w-full p-3 border border-gray-300 rounded-lg text-lg outline-none focus:border-yellow-400" placeholder="e.g. 50" />
+              </div>
+              <div className="flex justify-end space-x-3 mt-6">
+                <button type="button" onClick={() => setShowBudgetModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg font-semibold">Cancel</button>
+                <button type="submit" className="px-4 py-2 bg-yellow-400 hover:bg-yellow-500 text-gray-900 rounded-lg font-bold">Save Budget</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

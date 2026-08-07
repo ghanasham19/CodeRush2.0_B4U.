@@ -5,20 +5,22 @@ import { useWeb3 } from '../context/Web3Context';
 
 const Navbar = () => {
   const { currentUser, userRole, logout } = useAuth();
-  const { account, balance } = useWeb3();
+  const { account, disconnectWallet } = useWeb3();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
     try {
-      await logout();
+      await disconnectWallet(); // Disconnect Pera Wallet
+      logout(); // Clear local session
       navigate('/');
     } catch (error) {
       console.error('Failed to log out', error);
     }
   };
 
+  // Algorand addresses are 58 chars long
   const formatAddress = (address) => {
-    return address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '';
+    return address ? `${address.slice(0, 8)}...${address.slice(-6)}` : '';
   };
 
   return (
@@ -28,8 +30,6 @@ const Navbar = () => {
       </Link>
       
       <div className="flex items-center space-x-6">
-        
-        {/* Only show User Controls AND Wallet info if they are fully authenticated */}
         {currentUser ? (
           <>
             <div className="border-r border-gray-200 pr-6 hidden sm:block">
@@ -38,8 +38,8 @@ const Navbar = () => {
                 <span className="text-sm font-semibold text-gray-700 font-mono">
                   {formatAddress(account || currentUser.walletAddress)}
                 </span>
-                <span className="text-sm font-bold text-orange-500">
-                  {balance ? `${balance} ETH` : 'Web3 Auth'}
+                <span className="text-sm font-bold text-yellow-600">
+                  Algorand
                 </span>
               </div>
             </div>
