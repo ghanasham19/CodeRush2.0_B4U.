@@ -1,17 +1,35 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 // Load environment variables
 dotenv.config();
+
+// Initialize Firebase Admin SDK
+import './config/firebaseAdmin.js'; 
+
+// Import Routes
+import uploadRoutes from './routes/uploadRoutes.js';
+
+// ES Module fix for directory paths
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Essential Middlewares
-app.use(cors()); // Allows our React frontend (port 5173) to talk to this backend
-app.use(express.json()); // Parses incoming JSON payloads
+app.use(cors());
+app.use(express.json()); 
 app.use(express.urlencoded({ extended: true }));
+
+// Serve the 'uploads' directory statically so PDFs can be downloaded/viewed
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+// Register Routes
+app.use('/api/upload', uploadRoutes);
 
 // Basic Health Check Route
 app.get('/api/health', (req, res) => {
