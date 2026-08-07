@@ -5,6 +5,7 @@ import { useWeb3 } from '../../context/Web3Context';
 import ReactMarkdown from 'react-markdown';
 import algosdk from 'algosdk';
 import { collection, getDocs, doc, updateDoc, getDoc, increment } from 'firebase/firestore';
+import DynamicChat from '../../components/DynamicChat';
 const Marketplace = () => {
   const { currentUser } = useAuth();
   const { lute, account, refreshBalance } = useWeb3();
@@ -185,6 +186,12 @@ const Marketplace = () => {
         <div className="flex flex-col lg:flex-row gap-8">
           <div className="lg:w-1/3 space-y-6">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <DynamicChat
+                documentId={selectedDoc.id}
+                publisherId={selectedDoc.publisherId}
+                pdfUrl={selectedDoc.pdfUrl}
+              />
+
               <span className="bg-blue-100 text-blue-800 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide">
                 Document Preview
               </span>
