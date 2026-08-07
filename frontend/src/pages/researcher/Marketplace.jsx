@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../config/firebase';
-import { collection, getDocs, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { useAuth } from '../../context/AuthContext';
 import { useWeb3 } from '../../context/Web3Context';
 import ReactMarkdown from 'react-markdown';
 import algosdk from 'algosdk';
-
+import { collection, getDocs, doc, updateDoc, getDoc, increment } from 'firebase/firestore';
 const Marketplace = () => {
   const { currentUser } = useAuth();
-  const { lute, account } = useWeb3();
+  const { lute, account, refreshBalance } = useWeb3();
 
   const [documents, setDocuments] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -106,14 +105,14 @@ const Marketplace = () => {
 
       // 5. Use the raw base Transaction constructor (Bypasses helper function bugs)
       const txn = new algosdk.makePaymentTxnWithSuggestedParamsFromObject({
-    sender: safeSender,
-    receiver: safeReceiver,
-    amount: amountInMicroAlgos,
-    suggestedParams,
-    note: new Uint8Array(
-        new TextEncoder().encode("EvidenceHub Insight")
-    )
-});
+        sender: safeSender,
+        receiver: safeReceiver,
+        amount: amountInMicroAlgos,
+        suggestedParams,
+        note: new Uint8Array(
+          new TextEncoder().encode("EvidenceHub Insight")
+        )
+      });
 
       const encodedTxn = algosdk.encodeUnsignedTransaction(txn);
       const txnBase64 = window.btoa(String.fromCharCode.apply(null, encodedTxn));
@@ -123,14 +122,19 @@ const Marketplace = () => {
 
       // Broadcast to network
       const { txId } = await algodClient.sendRawTransaction(signedTxns[0]).do();
-      console.log(`✅ Transaction Broadcasted! TXID: ${txId}`);
 
+      console.log(`✅ Transaction Broadcasted! TXID: ${txId}`);
+      await refreshBalance();
       // Update Local Budget
       const newSpent = spent + price;
       const userRef = doc(db, 'users', currentUser.uid);
       await updateDoc(userRef, { spent: newSpent });
       setSpent(newSpent);
 
+      const documentRef = doc(db, 'documents', selectedDoc.id);
+      await updateDoc(documentRef, {
+        totalSalesALGO: increment(Number(price))
+      });
       // Fetch AI Insight
       const response = await fetch('http://localhost:5000/api/ai/insight', {
         method: 'POST',
@@ -185,7 +189,7 @@ const Marketplace = () => {
                 Document Preview
               </span>
               <h2 className="text-2xl font-bold text-gray-900 mt-4 mb-2">{selectedDoc.title}</h2>
-              <p className="text-gray-500 text-sm mb-6">Published by: {selectedDoc.publisherId.slice(0,8)}...</p>
+              <p className="text-gray-500 text-sm mb-6">Published by: {selectedDoc.publisherId.slice(0, 8)}...</p>
 
               <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
                 <p className="text-gray-600 text-sm italic">
@@ -293,7 +297,7 @@ const Marketplace = () => {
                   {doc.questions?.length || 0} Insights
                 </span>
                 <h3 className="text-xl font-bold text-gray-900 mt-4 mb-2 line-clamp-2">{doc.title}</h3>
-                <p className="text-gray-500 text-sm mb-4">Author: {doc.publisherId.slice(0,6)}...</p>
+                <p className="text-gray-500 text-sm mb-4">Author: {doc.publisherId.slice(0, 6)}...</p>
               </div>
 
               <div className="pt-4 border-t border-gray-100">

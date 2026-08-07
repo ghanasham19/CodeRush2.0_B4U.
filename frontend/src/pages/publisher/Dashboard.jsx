@@ -141,7 +141,9 @@ const Dashboard = () => {
                 <tr key={doc.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-6 py-4 font-medium text-gray-900">{doc.title}</td>
                   <td className="px-6 py-4">{doc.questions?.length || 0} Questions</td>
-                  <td className="px-6 py-4 font-bold text-yellow-600">{doc.totalSalesALGO || 0} ALGO</td>
+                  <td className="px-6 py-4 font-bold text-yellow-600">
+                    {doc.totalSalesALGO ? Number(doc.totalSalesALGO).toFixed(2) : '0.00'} ALGO
+                  </td>
                   <td className="px-6 py-4 text-gray-500">{new Date(doc.createdAt).toLocaleDateString()}</td>
                 </tr>
               ))}

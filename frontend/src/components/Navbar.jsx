@@ -5,12 +5,12 @@ import { useWeb3 } from '../context/Web3Context';
 
 const Navbar = () => {
   const { currentUser, userRole, logout } = useAuth();
-  const { account, disconnectWallet } = useWeb3();
+  const { account, algoBalance, disconnectWallet } = useWeb3();
   const navigate = useNavigate();
 
   const handleLogout = async () => {
     try {
-      await disconnectWallet(); // Disconnect Pera Wallet
+      await disconnectWallet(); // Disconnect Lute Wallet
       logout(); // Clear local session
       navigate('/');
     } catch (error) {
@@ -38,8 +38,9 @@ const Navbar = () => {
                 <span className="text-sm font-semibold text-gray-700 font-mono">
                   {formatAddress(account || currentUser.walletAddress)}
                 </span>
-                <span className="text-sm font-bold text-yellow-600">
-                  Algorand
+                <span className="text-xs font-bold text-gray-300">|</span>
+                <span className="text-sm font-bold text-purple-600 font-mono bg-purple-50 px-2.5 py-1 rounded-lg border border-purple-200">
+                  {algoBalance ? `${algoBalance} ALGO` : '0.0000 ALGO'}
                 </span>
               </div>
             </div>
