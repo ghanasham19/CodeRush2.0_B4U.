@@ -2,9 +2,9 @@
 
 ## Project Information
 
-* **Team Name:** [Enter Team Name]
+* **Team Name:** B4U
 * **Project Title:** EvidenceHub AI
-* **Track/Theme:** Tracks 4 & 5 (Agentic Research and Content Paywall)
+* **Track/Theme:** Tracks 4 (Agentic Payment applications)
 
 ---
 
